@@ -75,6 +75,7 @@ gifski_first_error <- TRUE
 gifski_renderer <- function(file = tempfile(fileext = '.gif'), loop = TRUE, width = NULL, height = NULL) {
   if (!requireNamespace('gifski', quietly = TRUE)) {
     if (gifski_first_error) {
+      unlockBinding(sym = 'gifski_first_error', env = environment())
       gifski_first_error <<- FALSE
       stop(
         'The `gifski_renderer()` is selected by default but requires the gifski\n',
