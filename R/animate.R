@@ -3,28 +3,31 @@
 #' This function takes a gganim object and renders it into an animation. The
 #' nature of the animation is dependent on the renderer, but defaults to using
 #' `magick` to render it to a gif. The length and framerate is decided on render
-#' time and can be any two combination of `nframes`, `fps`, and `length`.
+#' time and can be any two combination of `nframes`, `fps`, and `duration`.
 #' Rendering is happening in discrete time units. This means that any event in
 #' the animation is rounded of to the nearest frame (e.g. entering will always
-#' take a whole number of frames). This means that rounding artefacts are
+#' take a whole number of frames). This means that rounding artifacts are
 #' possible when only rendering few frames. To avoid this you can increase the
 #' `detail` argument. `detail` will get multiplied to `nframes` and the
 #' resulting number of frames will get calculated, but only `nframes` evenly
 #' spaced frames are rendered.
 #'
 #' @param plot,x A `gganim` object
-#' @param nframes The number of frames to render
-#' @param fps The framerate of the animation in frames/sec
-#' @param length The length of the animation in seconds
-#' @param detail The number of additional frames to calculate, per frame
+#' @param nframes The number of frames to render (default `100`)
+#' @param fps The framerate of the animation in frames/sec (default `10`)
+#' @param duration The length of the animation in seconds (unset by default)
+#' @param detail The number of additional frames to calculate, per frame (default `1`)
 #' @param renderer The function used to render the generated frames into an
-#' animation. Gets a vector of paths to images along with the framerate.
+#' animation. Gets a vector of paths to images along with the framerate. (default [gifski_renderer()])
 #' @param device The device to use for rendering the single frames. Possible
-#' values are `'png'`, `'jpeg'`, `'tiff'`, `'bmp'`, `'svg'`, and `'svglite'`.
-#' Defaults to `'png'`. (`'svglite'` requires the svglite package).
+#' values are `'png'`, `'jpeg'`, `'tiff'`, `'bmp'`, `'svg'`, and `'svglite'`
+#' (requires the svglite package). (default `'png'`)
 #' @param ref_frame The frame to use for fixing dimensions of the plot, e.g. the
 #' space available for axis text. Defaults to the first frame. Negative values
-#' counts backwards (-1 is the last frame)
+#' counts backwards (-1 is the last frame) (default `1`)
+#' @param start_pause,end_pause Number of times to repeat the first and last
+#' frame in the animation (default is `0` for both)
+#' @param rewind Should the animation roll back in the end (default `FALSE`)
 #' @param ... Arguments passed on to the device
 #'
 #' @return The return value of the `renderer` function
@@ -35,38 +38,145 @@
 #' The `plot()` method is different and produces an ensemble of frames to give
 #' a static overview of the animation. The default is to produce a 3x3 grid.
 #'
+#' @section Changing Defaults:
+#' It is possible to overwrite the defaults used by gganimate for the animation
+#' by setting them with [options()] (prefixed with `gganimate.`. As an example,
+#' if you would like to change the default nframes to 50 you would call
+#' `options(gganimate.nframes = 50)`. In order to set default device arguments
+#' (those you would normally pass through with `...`) you should use the
+#' `gganimate.dev_args` options and provide a list of arguments e.g.
+#' `options(gganimate.dev_args = list(width = 800, height = 600))` Defaults set
+#' this way can still be overridden by giving arguments directly to `animate()`.
+#'
+#' @section knitr Support:
+#' It is possible to specify the arguments to `animate()` in the chunk options
+#' when using `gganimate` with `knitr`. Arguments specified in this way will
+#' have precedence over defaults, but not over arguments specified directly in
+#' `animate()`. The arguments should be provided as a list to the `gganimate`
+#' chunk option, e.g. `{r, gganimate = list(nframes = 50, fps = 20)}`. A few
+#' build-in knitr options have relevance for animation and will be used unless
+#' given specifically in the `gganimate` list option. The native knitr options
+#' supported are:
+#'
+#' - `interval`: will set fps to `1/interval`
+#' - `dev`: will set `device`
+#' - `dev.args`: will set additional arguments to the device (`...`)
+#' - `fig.width`, `fig.height`, `fig.asp`, `fig.dim`: will set `width` and
+#' `height` of the device.
+#'
 #' @importFrom grid grid.newpage grid.draw convertWidth convertHeight
 #' @importFrom grDevices png jpeg tiff bmp svg dev.off
 #' @importFrom progress progress_bar
 #' @importFrom ggplot2 ggplot_gtable ggplot_build
 #' @export
-animate <- function(plot, nframes = 100, fps = 10, length = NULL, detail = 1,
-                    renderer = gifski_renderer(), device = 'png', ref_frame = 1,
-                    ...) {
-  if (sum(c(is.null(nframes), is.null(fps), is.null(length))) > 1) {
-    stop("At least 2 of 'nframes', 'fps', and 'length' must be given", call. = FALSE)
+animate <- function(plot, nframes, fps, duration, detail, renderer, device, ref_frame, start_pause, end_pause, rewind, ...) {
+  args <- prepare_args(
+    nframes = nframes,
+    fps = fps,
+    duration = duration,
+    detail = detail,
+    renderer = renderer,
+    device = device,
+    ref_frame = ref_frame,
+    start_pause = start_pause,
+    end_pause = end_pause,
+    rewind = rewind,
+    ...
+  )
+  orig_nframes <- args$nframes
+  args$nframes <- args$nframes - args$start_pause - args$end_pause
+  if (args$rewind) {
+    args$nframes <- ceiling((args$nframes - args$start_pause) / 2)
+    args$end_pause <- ceiling(args$end_pause / 2)
   }
-  if (device == 'svglite' && !requireNamespace('svglite', quietly = TRUE)) {
-    stop('The svglite package is required to use this device', call. = FALSE)
-  }
-
-  nframes <- nframes %||% round(length * fps)
-  fps <- fps %||% round(nframes / length)
-  nframes_total <- (nframes - 1) * detail + 1
+  nframes_total <- (args$nframes - 1) * args$detail + 1
   plot <- prerender(plot, nframes_total)
   nframes_final <- get_nframes(plot)
 
-  frame_ind <- unique(round(seq(1, nframes_final, length.out = nframes)))
-  if (nframes != length(frame_ind)) message('nframes adjusted to match plot')
+  frame_ind <- unique(round(seq(1, nframes_final, length.out = args$nframes)))
 
-  if (ref_frame < 0) ref_frame <- nframes_final + 1 + ref_frame
+  if (args$device == 'current') {
+    frame_ind <- c(rep(frame_ind[1], args$start_pause), frame_ind, rep(frame_ind[length(frame_ind)], args$end_pause))
+    if (args$rewind) frame_ind <- c(frame_ind, rev(frame_ind))
+    if (args$ref_frame < 0) {
+      args$ref_frame <- args$ref_frame - args$end_pause
+    } else {
+      args$ref_frame <- args$ref_frame + args$start_pause
+    }
+  }
 
-  frames_vars <- draw_frames(plot, frame_ind, device, ref_frame, ...)
+  if (args$nframes != length(frame_ind)) {
+    message('nframes and fps adjusted to match transition')
+    args$fps <- args$fps * length(frame_ind) / args$nframes
+  }
 
-  animation <- renderer(frames_vars$frame_source, fps)
-  attr(animation, 'frame_vars') <- frame_vars
+  if (args$ref_frame < 0) args$ref_frame <- nframes_final + 1 + args$ref_frame
+
+  frames_vars <- do.call(
+    draw_frames,
+    c(list(plot = plot,
+           frames = frame_ind,
+           device = args$device,
+           ref_frame = args$ref_frame),
+      args$dev_args)
+  )
+  if (args$device == 'current') return(invisible(frames_vars))
+
+  if (args$start_pause != 0) frames_vars <- rbind(frames_vars[rep(1, args$start_pause), , drop = FALSE], frames_vars)
+  if (args$end_pause != 0) frames_vars <- rbind(frames_vars, frames_vars[rep(nrow(frames_vars), args$end_pause), , drop = FALSE])
+  if (args$rewind) frames_vars <- rbind(frames_vars, frames_vars[rev(seq_len(orig_nframes - nrow(frames_vars))), , drop = FALSE])
+
+  animation <- args$renderer(frames_vars$frame_source, args$fps)
+  attr(animation, 'frame_vars') <- frames_vars
   set_last_animation(animation)
   animation
+}
+
+#' Catch attempt to use the old API
+#'
+#' @export
+#' @keywords internal
+gganimate <- function(...) {
+  stop(
+    'It appears that you are trying to use the old API, which has been deprecated.\n',
+    'Please update your code to the new API or install the old version of gganimate\n',
+    'from https://github.com/thomasp85/gganimate/releases/tag/v0.1.1',
+    call. = FALSE
+  )
+}
+#' @rdname gganimate
+#' @export
+gg_animate <- gganimate
+
+#' @importFrom utils modifyList
+prepare_args <- function(nframes, fps, duration, detail, renderer, device, ref_frame, start_pause, end_pause, rewind, ...) {
+  args <- list()
+  args$nframes <- nframes %?% getOption('gganimate.nframes', 100)
+  args$fps <- fps %?% getOption('gganimate.fps', 10)
+  duration <- duration %?% getOption('gganimate.duration', NULL)
+  if (!is.null(duration)) {
+    if (
+      !missing(fps) ||
+      is.null(args$nframes) ||
+      (!is.null(getOption('gganimate.fps')) && is.null(getOption('gganimate.nframes')))
+    ) args$nframes <- duration * args$fps
+    else args$fps <- args$nframes / duration
+  }
+  if (is.null(args$nframes) || is.null(args$fps)) {
+    stop("At least 2 of 'nframes', 'fps', and 'duration' must be given", call. = FALSE)
+  }
+  args$detail <- detail %?% getOption('gganimate.detail', 1)
+  args$renderer <- renderer %?% getOption('gganimate.renderer', gifski_renderer())
+  args$device <- tolower(device %?% getOption('gganimate.device', 'png'))
+  if (args$device == 'svglite' && !requireNamespace('svglite', quietly = TRUE)) {
+    stop('The svglite package is required to use this device', call. = FALSE)
+  }
+  args$ref_frame <- ref_frame %?% getOption('gganimate.ref_frame', 1)
+  args$start_pause <- start_pause %?% getOption('gganimate.start_pause', 0)
+  args$end_pause <- end_pause %?% getOption('gganimate.end_pause', 0)
+  args$rewind <- rewind %?% getOption('gganimate.rewind', FALSE)
+  args$dev_args <- modifyList(getOption('gganimate.dev_args', list()), list(...))
+  args
 }
 # Build plot for a specific number of frames
 prerender <- function(plot, nframes) {
@@ -77,7 +187,15 @@ prerender <- function(plot, nframes) {
 # Returns a data.frame of frame metadata with image location in frame_source
 # column
 draw_frames <- function(plot, frames, device, ref_frame, ...) {
-  dims <- plot_dims(plot, ref_frame)
+  stream <- device == 'current'
+
+  dims <- tryCatch(
+    plot_dims(plot, ref_frame),
+    error = function(e) {
+      warning('Cannot get dimensions of plot table. Plot region might not be fixed', call. = FALSE)
+      list(widths = NULL, heights = NULL)
+    }
+  )
 
   dir <- tempfile(pattern = '')
   dir.create(dir, showWarnings = FALSE)
@@ -87,10 +205,12 @@ draw_frames <- function(plot, frames, device, ref_frame, ...) {
     png = paste0(files, '.png'),
     jpg =,
     jpeg = paste0(files, '.jpg'),
+    tif =,
     tiff = paste0(files, '.tif'),
     bmp = paste0(files, '.bmp'),
     svglite =,
     svg = paste0(files, '.svg'),
+    current = files,
     stop('Unsupported device', call. = FALSE)
   )
   device <- switch(
@@ -98,6 +218,7 @@ draw_frames <- function(plot, frames, device, ref_frame, ...) {
     png = png,
     jpg =,
     jpeg = jpeg,
+    tif =,
     tiff = tiff,
     bmp = bmp,
     svg = svg,
@@ -112,28 +233,35 @@ draw_frames <- function(plot, frames, device, ref_frame, ...) {
   pb$tick(0)
 
   for (i in seq_along(frames)) {
-    device(files[i], ...)
+    if (!stream) device(files[i], ...)
 
-    frame <- plot$scene$get_frame(plot, frames[i])
-    frame <- ggplot_gtable(frame)
-    frame$widths <- dims$widths
-    frame$heights <- dims$heights
-    grid.draw(frame)
+    tryCatch(
+      plot$scene$plot_frame(plot, frames[i], widths = dims$widths, heights = dims$heights),
+      error = function(e) {
+        warning(conditionMessage(e), call. = FALSE)
+      }
+    )
 
     rate <- i/as.double(Sys.time() - start, units = 'secs')
     if (is.nan(rate)) rate <- 0
     rate <- format(rate, digits = 2)
     pb$tick(tokens = list(fps = rate))
 
-    dev.off()
+    if (!stream) dev.off()
   }
 
   frame_vars <- plot$scene$frame_vars[frames, , drop = FALSE]
-  frame_vars$frame_source <- files
+  if (!stream) frame_vars$frame_source <- files
   frame_vars
 }
 # Get dimensions of plot based on a reference frame
 plot_dims <- function(plot, ref_frame) {
+  tmpf <- tempfile()
+  png(tmpf)
+  on.exit({
+    dev.off()
+    unlink(tmpf)
+  })
   frame <- plot$scene$get_frame(plot, ref_frame)
   frame <- ggplot_gtable(frame)
   widths_rel <- frame$widths

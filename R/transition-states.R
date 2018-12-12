@@ -1,6 +1,3 @@
-#' @include transition-manual.R
-NULL
-
 #' Transition between several distinct stages of the data
 #'
 #' This transition splits your data into multiple states based on the levels in
@@ -22,7 +19,7 @@ NULL
 #' `transition_states` makes the following variables available for string
 #' literal interpretation:
 #'
-#' - **transitioning** is a booloean indicating whether the frame is part of the
+#' - **transitioning** is a boolean indicating whether the frame is part of the
 #'   transitioning phase
 #' - **previous_state** The name of the last state the animation was at
 #' - **closest_state** The name of the state closest to this frame
@@ -44,6 +41,7 @@ NULL
 #' @importFrom ggplot2 ggproto
 transition_states <- function(states, transition_length, state_length, wrap = TRUE) {
   states_quo <- enquo(states)
+  require_quo(states_quo, 'states')
   ggproto(NULL, TransitionStates,
     params = list(
       states_quo = states_quo,
@@ -60,12 +58,24 @@ transition_states <- function(states, transition_length, state_length, wrap = TR
 #' @importFrom ggplot2 ggproto
 #' @importFrom stringi stri_match
 #' @importFrom tweenr tween_state keep_state
-#' @importFrom transformr tween_path tween_polygon tween_sf
-TransitionStates <- ggproto('TransitionStates', TransitionManual,
+TransitionStates <- ggproto('TransitionStates', Transition,
+  mapping = '(.*)',
+  var_names = 'states',
   setup_params = function(self, data, params) {
-    states <- combine_levels(data, params$states_quo)
-    all_levels <- states$levels
-    row_state <- states$values
+    params$states <- get_row_frames(data, params$states_quo, after = FALSE)
+    params$require_stat <- is_placeholder(params$states)
+    params$row_id <- params$states$values
+    params
+  },
+  setup_params2 = function(self, data, params, row_vars) {
+    if (is_placeholder(params$states)) {
+      params$states <- get_row_frames(data, params$states_quo, after = TRUE)
+    } else {
+      params$states$values <- lapply(row_vars$states, as.integer)
+    }
+
+    all_levels <- params$states$levels
+    row_state <- params$states$values
     transition_length <- rep(params$transition_length, length.out = length(all_levels))
     if (!params$wrap) transition_length[length(transition_length)] <- 0
     state_length <- rep(params$state_length, length.out = length(all_levels))
@@ -85,10 +95,10 @@ TransitionStates <- ggproto('TransitionStates', TransitionManual,
     params
   },
   expand_panel = function(self, data, type, id, match, ease, enter, exit, params, layer_index) {
-    split_panel <- stri_match(data$group, regex = '^(.+)<(.+)>(.*)$')
-    if (is.na(split_panel[1])) return(data)
-    data$group <- paste0(split_panel[, 2], split_panel[, 4])
-    state <- as.integer(split_panel[, 3])
+    row_state <- self$get_row_vars(data)
+    if (is.null(row_state)) return(data)
+    data$group <- paste0(row_state$before, row_state$after)
+    state <- as.integer(row_state$states)
     states <- split(data, state)
     all_states <- rep(list(data[0, ]), length(params$state_levels))
     all_states[as.integer(names(states))] <- states
@@ -101,10 +111,10 @@ TransitionStates <- ggproto('TransitionStates', TransitionManual,
         next_state <- if (i == length(all_states)) all_states[[1]] else all_states[[i + 1]]
         all_frames <- switch(
           type,
-          point = tween_state(all_frames, next_state, ease, params$transition_length[i], id, enter, exit),
-          path = tween_path(all_frames, next_state, ease, params$transition_length[i], id, enter, exit, match),
-          polygon = tween_polygon(all_frames, next_state, ease, params$transition_length[i], id, enter, exit, match),
-          sf = tween_sf(all_frames, next_state, ease, params$transition_length[i], id, enter, exit),
+          point = tween_state(all_frames, next_state, ease, params$transition_length[i], !!id, enter, exit),
+          path = transform_path(all_frames, next_state, ease, params$transition_length[i], !!id, enter, exit, match),
+          polygon = transform_polygon(all_frames, next_state, ease, params$transition_length[i], !!id, enter, exit, match),
+          sf = transform_sf(all_frames, next_state, ease, params$transition_length[i], !!id, enter, exit),
           stop("Unknown layer type", call. = FALSE)
         )
       }

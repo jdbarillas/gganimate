@@ -3,8 +3,9 @@ create_scene <- function(transition, view, shadow, ease, transmuters, nframes) {
   if (is.null(nframes)) nframes <- 100
   ggproto(NULL, Scene, transition = transition, view = view, shadow = shadow, ease = ease, transmuters = transmuters, nframes = nframes)
 }
-#' @importFrom ggplot2 ggproto
+#' @importFrom ggplot2 ggproto ggplot_gtable
 #' @importFrom glue glue_data
+#' @importFrom grid grid.newpage grid.draw seekViewport pushViewport upViewport
 Scene <- ggproto('Scene', NULL,
   transition = NULL,
   view = NULL,
@@ -35,6 +36,7 @@ Scene <- ggproto('Scene', NULL,
     self$transmuters$setup(layers)
     self$layer_type <- self$get_layer_type(layer_data, layers)
     self$tween_first <- self$is_early_tween(layers)
+    if (self$transition$require_late_tween(self$transition_params)) self$tween_first[] <- FALSE
     self$group_column <- self$get_group_column(layers)
     self$match_shape <- self$get_shape_match(layers)
   },
@@ -55,6 +57,9 @@ Scene <- ggproto('Scene', NULL,
     layer_data
   },
   after_stat = function(self, layer_data) {
+    row_vars <- self$transition$get_all_row_vars(layer_data)
+    self$transition_params <- self$transition$setup_params2(layer_data, self$transition_params, row_vars)
+    layer_data <- self$transition$map_data(layer_data, self$transition_params, replace = TRUE)
     layer_data
   },
   before_position = function(self, layer_data) {
@@ -113,22 +118,44 @@ Scene <- ggproto('Scene', NULL,
     })
     plot
   },
+  plot_frame = function(self, plot, i, newpage = is.null(vp), vp = NULL, widths = NULL, heights = NULL, ...) {
+    plot <- self$get_frame(plot, i)
+    plot <- ggplot_gtable(plot)
+    if (!is.null(widths)) plot$widths <- widths
+    if (!is.null(heights)) plot$heights <- heights
+    if (newpage) grid.newpage()
+    grDevices::recordGraphics(
+      requireNamespace("gganimate", quietly = TRUE),
+      list(),
+      getNamespace("gganimate")
+    )
+    if (is.null(vp)) {
+      grid.draw(plot)
+    } else {
+      if (is.character(vp)) seekViewport(vp)
+      else pushViewport(vp)
+      grid.draw(plot)
+      upViewport()
+    }
+    invisible(NULL)
+  },
   set_labels = function(self, plot, i) {
     label_var <- as.list(self$frame_vars[i, ])
     label_var$data <- plot$data
     plot$plot$labels <- lapply(plot$plot$labels, function(label) {
+      if (is.expression(label)) return(label)
       vapply(label, glue_data, character(1), .x = label_var, .envir = plot$plot$plot_env)
     })
     plot
   },
   get_group_column = function(self, layers) {
-    vapply(layers, function(l) {
-      group_column(l$stat) %||% group_column(l$geom) %||% 'group'
-    }, character(1))
+    lapply(layers, function(l) {
+      group_column(l$stat) %||% group_column(l$geom) %||% quo(group)
+    })
   },
   get_layer_type = function(self, data, layers) {
     unlist(Map(function(l, d) {
-      layer_type(l$stat) %||% layer_type(l$geom) %||% layer_type(d)
+      layer_type(l$stat) %||% layer_type(l$geom) %||% layer_type(d) %||% 'point'
     }, l = layers, d = data))
   },
   get_shape_match = function(self, layers) {

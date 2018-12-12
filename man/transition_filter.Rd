@@ -14,7 +14,7 @@ recycled to match the number of states in the data}
 \item{filter_length}{The relative length of the pause at the states. Will be
 recycled to match the number of states in the data}
 
-\item{...}{A number of expression to be evaluated in the context of the layer
+\item{...}{A number of expressions to be evaluated in the context of the layer
 data, returning a logical vector. If the expressions are named, the name will
 be available as a frame variable.}
 
@@ -37,7 +37,7 @@ kept the enter function will have no effect.
 \code{transition_filter} makes the following variables available for string
 literal interpretation:
 \itemize{
-\item \strong{transitioning} is a booloean indicating whether the frame is part of the
+\item \strong{transitioning} is a boolean indicating whether the frame is part of the
 transitioning phase
 \item \strong{previous_filter} The name of the last filter the animation was at
 \item \strong{closest_filter} The name of the filter closest to this frame
@@ -54,6 +54,7 @@ Other transitions: \code{\link{transition_components}},
   \code{\link{transition_layers}},
   \code{\link{transition_manual}},
   \code{\link{transition_null}},
+  \code{\link{transition_reveal}},
   \code{\link{transition_states}},
   \code{\link{transition_time}}
 }

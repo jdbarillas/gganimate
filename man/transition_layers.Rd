@@ -5,7 +5,7 @@
 \title{Build up a plot, layer by layer}
 \usage{
 transition_layers(layer_length, transition_length, keep_layers = TRUE,
-  from_blank = TRUE, layer_names = NULL)
+  from_blank = TRUE, layer_order = NULL, layer_names = NULL)
 }
 \arguments{
 \item{layer_length}{The proportional time to pause at each layer before a new
@@ -14,11 +14,18 @@ one enters}
 \item{transition_length}{The proportional time to use for the entrance of a
 new layer}
 
-\item{keep_layers}{Should layers be kept on screen after they have appeeared
-or transition out when a new layer enters}
+\item{keep_layers}{Either an integer indicating for how many following layers
+the layers should stay on screen or a logical. In the case of the later,
+\code{TRUE} will mean keep the layer for the remainder of the animation
+(equivalent to setting it to \code{Inf}) and \code{FALSE} will mean to transition the
+layer out as the next layer enters.}
 
 \item{from_blank}{Should the first layer transition in or be present on the
 onset of the animation}
+
+\item{layer_order}{An alternative order the layers should appear in (default
+to using the stacking order). All other arguments that references the layers
+index in some way refers to this order.}
 
 \item{layer_names}{A character vector of names for each layers, to be used
 when interpreting label literals}
@@ -33,7 +40,7 @@ but they can also be set to be removed as the next layer enters.
 \code{transition_layers} makes the following variables available for string
 literal interpretation:
 \itemize{
-\item \strong{transitioning} is a booloean indicating whether the frame is part of the
+\item \strong{transitioning} is a boolean indicating whether the frame is part of the
 transitioning phase
 \item \strong{previous_layer} The name of the last layer the animation was showing
 \item \strong{closest_layer} The name of the layer the animation is closest to showing
@@ -48,6 +55,7 @@ Other transitions: \code{\link{transition_components}},
   \code{\link{transition_filter}},
   \code{\link{transition_manual}},
   \code{\link{transition_null}},
+  \code{\link{transition_reveal}},
   \code{\link{transition_states}},
   \code{\link{transition_time}}
 }

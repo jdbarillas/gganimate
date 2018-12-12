@@ -4,12 +4,15 @@
 \alias{transition_manual}
 \title{Create an animation by specifying the frame membership directly}
 \usage{
-transition_manual(frames, ...)
+transition_manual(frames, ..., cumulative = FALSE)
 }
 \arguments{
 \item{frames}{The unquoted name of the column holding the frame membership.}
 
 \item{...}{Additional variables}
+
+\item{cumulative}{Keep data from previous frames as part of the current frame
+data}
 }
 \description{
 This transition allows you to map a variable in your data to a specific frame
@@ -34,6 +37,7 @@ Other transitions: \code{\link{transition_components}},
   \code{\link{transition_filter}},
   \code{\link{transition_layers}},
   \code{\link{transition_null}},
+  \code{\link{transition_reveal}},
   \code{\link{transition_states}},
   \code{\link{transition_time}}
 }

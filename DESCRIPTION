@@ -25,28 +25,25 @@ Suggests: magick,
     testthat,
     base64enc,
     htmltools,
-    covr
-RoxygenNote: 6.1.0
+    covr,
+    transformr,
+    av,
+    png,
+    gifski
+RoxygenNote: 6.1.1
 Roxygen: list(markdown = TRUE)
 URL: http://github.com/thomasp85/gganimate
 BugReports: http://github.com/thomasp85/gganimate/issues
-Remotes: thomasp85/tweenr,
-    thomasp85/transformr,
-    thomasp85/patchwork
 Imports: stringi,
     tweenr,
-    transformr,
     grid,
     rlang,
     glue,
-    sf,
     progress,
-    patchwork,
     plyr,
     scales,
-    png,
-    gifski,
-    grDevices
+    grDevices,
+    utils
 Collate:
     'aaa.R'
     'anim_save.R'
@@ -69,15 +66,17 @@ Collate:
     'shadow-null.R'
     'shadow-trail.R'
     'shadow-wake.R'
+    'transformr.R'
     'transition-.R'
-    'transition-manual.R'
     'transition-components.R'
     'transition-events.R'
     'transition-filter.R'
+    'transition-manual.R'
     'transition-layers.R'
     'transition-null.R'
     'transition-states.R'
     'transition-time.R'
+    'transition_reveal.R'
     'transmute-.R'
     'transmute-enter.R'
     'transmute-exit.R'

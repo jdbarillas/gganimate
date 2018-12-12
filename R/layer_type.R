@@ -5,11 +5,13 @@
 #' @export
 layer_type <- function(x) UseMethod('layer_type')
 #' @export
-layer_type.default <- function(x) 'point'
+layer_type.default <- function(x) NULL
 #' @export
 layer_type.GeomPath <- function(x) 'path'
 #' @export
 layer_type.GeomRibbon <- function(x) 'path'
+#' @export
+layer_type.GeomSmooth <- function(x) 'path'
 #' @export
 layer_type.GeomPolygon <- function(x) 'polygon'
 #' @export

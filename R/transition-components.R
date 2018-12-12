@@ -1,21 +1,17 @@
-#' @include transition-manual.R
-NULL
-
 #' Transition individual components through their own lifecycle
 #'
 #' This transition allows individual visual components to define their own
-#' "life-cycle". This means that the final animation will not have any commen
+#' "life-cycle". This means that the final animation will not have any common
 #' "state" and "transition" phase as any component can be moving or static at
 #' any point in time.
 #'
-#' @param id The unquoted name of the column holding the id that links
-#' components across the data
 #' @param time The unquoted name of the column holding the time for each state
 #' of the components
 #' @param range The range the animation should span. Defaults to the range of
 #' time plus enter and exit length
 #' @param enter_length,exit_length How long time should be spend on enter and
 #' exit transitions. Defaults to 0
+#' @param id **Deprecated**
 #'
 #' @section Label variables:
 #' `transition_components` makes the following variables available for string
@@ -28,12 +24,12 @@ NULL
 #' @export
 #' @importFrom rlang enquo
 #' @importFrom ggplot2 ggproto
-transition_components <- function(id, time, range = NULL, enter_length = NULL, exit_length = NULL) {
-  id_quo <- enquo(id)
+transition_components <- function(time, range = NULL, enter_length = NULL, exit_length = NULL, id) {
+  if (!missing(id)) warning('The `id` argument has been deprecated. Set `id` in each layer with the `group` aesthetic', call. = FALSE)
   time_quo <- enquo(time)
+  require_quo(time_quo, 'time')
   ggproto(NULL, TransitionComponents,
           params = list(
-            id_quo = id_quo,
             time_quo = time_quo,
             range = range,
             enter_length = enter_length,
@@ -48,34 +44,45 @@ transition_components <- function(id, time, range = NULL, enter_length = NULL, e
 #' @importFrom ggplot2 ggproto
 #' @importFrom stringi stri_match
 #' @importFrom tweenr tween_components
-TransitionComponents <- ggproto('TransitionComponents', TransitionManual,
+TransitionComponents <- ggproto('TransitionComponents', Transition,
+  mapping = '(.+?)',
+  var_names = 'time',
   setup_params = function(self, data, params) {
-    data_info <- component_info(data, params)
+    params$time <- get_row_comp_time(data, params$time_quo, params)
+    params$require_stat <- is_placeholder(params$time)
+    static <- lengths(params$time$values) == 0
+    params$row_id <- Map(function(t, s) if (s) character() else t,
+                         t = params$time$values, s = static)
+    params
+  },
+  setup_params2 = function(self, data, params, row_vars) {
+    if (is_placeholder(params$time)) {
+      params$time <- get_row_comp_time(data, params$time_quo, params, after = TRUE)
+    } else {
+      params$time$values <- row_vars$time
+    }
+    static <- lengths(params$time$values) == 0
 
-    params$enter_length <- data_info$enter_length
-    params$exit_length <- data_info$exit_length
-    params$range <- data_info$range
-    params$frame_time <- data_info$frame_time
-    params$row_id <- Map(function(t, i, s) if (s) character() else paste0(t, '-', i),
-                         t = data_info$row_frame, i = data_info$row_id, s = data_info$static)
+    params$enter_length <- params$time$enter_length
+    params$exit_length <- params$time$exit_length
+    params$range <- params$time$range
+    params$frame_time <- params$time$frame_time
+    params$row_id <- Map(function(t, s) if (s) character() else t,
+                         t = params$time$values, s = static)
     params$frame_info <- data.frame(
-      frame_time = data_info$frame_time
+      frame_time = params$time$frame_time
     )
     params$nframes <- nrow(params$frame_info)
     params
   },
   expand_panel = function(self, data, type, id, match, ease, enter, exit, params, layer_index) {
-    split_panel <- stri_match(data$group, regex = '^(.+)<(.+?)-(.+)>(.*)$')
-    if (is.na(split_panel[1])) return(data)
-    data$group <- paste0(split_panel[, 2], split_panel[, 5])
-    time <- as.integer(split_panel[, 3])
-    id <- split_panel[, 4]
+    row_vars <- self$get_row_vars(data)
+    if (is.null(row_vars)) return(data)
+    data$group <- paste0(row_vars$before, row_vars$after)
+    time <- as.numeric(row_vars$time)
     all_frames <- switch(
       type,
-      point = tween_components(data, ease, params$nframes, !!time, !!id, params$range, enter, exit, params$enter_length, params$exit_length),
-      #path = tween_path(all_frames, next_state, es, params$transition_length[i], id, en, ex),
-      #polygon = tween_polygon(all_frames, next_state, es, params$transition_length[i], id, en, ex),
-      #sf = tween_sf(all_frames, next_state, es, params$transition_length[i], id, en, ex),
+      point = tween_components(data, ease, params$nframes, !!time, group, c(1, params$nframes), enter, exit, params$enter_length, params$exit_length),
       stop("Unsupported layer type", call. = FALSE)
     )
     all_frames$group <- paste0(all_frames$group, '<', all_frames$.frame, '>')
@@ -83,28 +90,13 @@ TransitionComponents <- ggproto('TransitionComponents', TransitionManual,
     all_frames
   }
 )
-
-component_info <- function(data, params) {
-  row_id <- lapply(data, safe_eval, expr = params$id_quo)
-  row_time <- lapply(data, safe_eval, expr = params$time_quo)
-  static_layer <- unlist(Map(function(data, id, time) {
-    (length(id) != 1 && length(id) != nrow(data)) || (length(time) != 1 && length(time) != nrow(data))
-  }, data = data, id = row_id, time = row_time))
-  if (all(static_layer)) {
-    stop('At least one layer must be in transition', call. = FALSE)
+get_row_comp_time <- function(data, quo, params, after = FALSE) {
+  if (!after && require_stat(quo[[2]])) {
+    return(eval_placeholder(data))
   }
-  row_id[static_layer] <- list(character(0))
-  row_time[static_layer] <- list(numeric(0))
+  row_time <- lapply(data, safe_eval, expr = quo)
   standard_times <- standardise_times(row_time, 'time')
-  range <- if (is.null(params$range)) {
-    range(unlist(standard_times$times))
-  } else {
-    if (!inherits(params$range, standard_times$class)) {
-      stop('range must be given in the same class as time', call. = FALSE)
-    }
-    as.numeric(params$range)
-  }
-  full_length <- diff(range)
+
   enter_length <- if (is.null(params$enter_length)) {
     0
   } else {
@@ -121,8 +113,20 @@ component_info <- function(data, params) {
     }
     as.numeric(params$exit_length)
   }
-  row_frame <- lapply(standard_times$times, function(x) {
-    round((params$nframes - 1) * (x - range[1])/full_length) + 1
+  range <- if (is.null(params$range)) {
+    range(unlist(standard_times$times)) + c(-enter_length, exit_length)
+  } else {
+    if (!inherits(params$range, standard_times$class)) {
+      stop('range must be given in the same class as time', call. = FALSE)
+    }
+    as.numeric(params$range)
+  }
+  full_length <- diff(range)
+  frames <- lapply(standard_times$times, function(x) {
+    if (is.null(x)) return(numeric())
+    frame <- round((params$nframes - 1) * (x - range[1])/full_length) + 1
+    nc <- nchar(max(frame))
+    sprintf(paste0('%0', nc, 'i'), frame)
   })
   frame_time <- recast_times(
     seq(range[1], range[2], length.out = params$nframes),
@@ -130,49 +134,9 @@ component_info <- function(data, params) {
   )
   frame_length <- full_length / params$nframes
   list(
-    row_id = row_id,
-    row_frame = row_frame,
+    values = frames,
     frame_time = frame_time,
     enter_length = round(enter_length / frame_length),
-    exit_length = round(exit_length / frame_length),
-    static = static_layer
-  )
-}
-
-standardise_times <- function(times, name, to_class = NULL) {
-  possible_classes <- c('integer', 'numeric', 'POSIXct', 'Date', 'difftime', 'hms')
-  classes <- vapply(times[lengths(times) != 0], function(x) {
-    cl <- inherits(x, possible_classes, which = TRUE)
-    which(cl != 0 & cl == min(cl[cl != 0]))[1]
-  }, integer(1))
-  if (anyNA(classes)) stop(name, ' data must either be ', paste0(possible_classes[-length(possible_classes)], collapse = ', '), ', or', possible_classes[length(possible_classes)], call. = FALSE)
-  if (length(unique(classes)) > 1) stop(name, ' data must be the same class in all layers', call. = FALSE)
-  cl <- possible_classes[unique(classes)]
-  if (length(cl) == 1 && (cl == 'difftime' || cl == 'hms')) {
-    if (is.null(to_class)) {
-      lapply(times, `units<-`, 'secs')
-    } else if (to_class == 'POSIXct') {
-      cl <- to_class
-      lapply(times, `units<-`, 'secs')
-    } else if (to_class == 'Date') {
-      cl <- to_class
-      lapply(times, `units<-`, 'days')
-    }
-  }
-  if (!is.null(to_class) && length(cl) != 0) if (cl != to_class) stop(name, ' data must be ', to_class, call. = FALSE)
-  list(
-    times = lapply(times, as.numeric),
-    class = cl
-  )
-}
-recast_times <- function(time, class) {
-  switch(
-    class,
-    integer = as.integer(round(time)),
-    numeric =  time,
-    POSIXct = structure(time, class = c('POSIXct', 'POSIXt')),
-    Date = structure(time, class = 'Date'),
-    difftime = structure(time, units = 'secs', class = 'difftime'),
-    hms = structure(time, units = 'secs', class = c('hms','difftime'))
+    exit_length = round(exit_length / frame_length)
   )
 }

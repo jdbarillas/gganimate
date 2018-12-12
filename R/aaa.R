@@ -16,3 +16,21 @@ safe_eval <- function(expr, data) {
     NULL
   }
 }
+#' @importFrom rlang quo_is_missing
+require_quo <- function(expr, name) {
+  if (quo_is_missing(expr)) {
+    stop(name, ' must be provided', call. = FALSE)
+  }
+}
+require_stat <- function(x) {
+  if (is.call(x)) {
+    if (identical(x[[1]], quote(stat))) {
+      TRUE
+    } else {
+      any(vapply(x, require_stat, logical(1)))
+    }
+  } else {
+    FALSE
+  }
+}
+`%?%` <- function(l, r) if (missing(l)) r else l

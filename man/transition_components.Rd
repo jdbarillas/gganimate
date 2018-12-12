@@ -4,13 +4,10 @@
 \alias{transition_components}
 \title{Transition individual components through their own lifecycle}
 \usage{
-transition_components(id, time, range = NULL, enter_length = NULL,
-  exit_length = NULL)
+transition_components(time, range = NULL, enter_length = NULL,
+  exit_length = NULL, id)
 }
 \arguments{
-\item{id}{The unquoted name of the column holding the id that links
-components across the data}
-
 \item{time}{The unquoted name of the column holding the time for each state
 of the components}
 
@@ -19,10 +16,12 @@ time plus enter and exit length}
 
 \item{enter_length, exit_length}{How long time should be spend on enter and
 exit transitions. Defaults to 0}
+
+\item{id}{\strong{Deprecated}}
 }
 \description{
 This transition allows individual visual components to define their own
-"life-cycle". This means that the final animation will not have any commen
+"life-cycle". This means that the final animation will not have any common
 "state" and "transition" phase as any component can be moving or static at
 any point in time.
 }
@@ -41,6 +40,7 @@ Other transitions: \code{\link{transition_events}},
   \code{\link{transition_layers}},
   \code{\link{transition_manual}},
   \code{\link{transition_null}},
+  \code{\link{transition_reveal}},
   \code{\link{transition_states}},
   \code{\link{transition_time}}
 }

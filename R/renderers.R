@@ -4,9 +4,29 @@
 #' assemble them into an animation. `gganimate` provide a range of renderers
 #' but it is also possible to provide your own, if the supplied ones are lacking
 #' in any way. A renderer is given as argument to [animate()]/print() and
-#' recieves the paths to the individual frames once they have been created.
+#' receives the paths to the individual frames once they have been created.
 #'
-#' @details It is possible to provide your own renderer function providing that it
+#' @details The `gifski_renderer()` is used unless otherwise specified in
+#' [animate()] or in `options('gganimate.renderer')`. This renderer requires
+#' both the `gifski` and `png` packages to be installed.
+#'
+#' Other possible renderers are:
+#' - `magick_renderer()` which requires the `magick` package and produce a `gif`.
+#' If `gifski` is not installed, the rendering will be much slower than using the
+#' `gifski_renderer()` and can potentially result in system problems when many
+#' frames need to be rendered (if `gifski` is installed `magick` will use it
+#' under the hood)
+#' - `av_renderer()` which requies the `av` package and uses ffmpeg to encode
+#' the animation into a video file.
+#' - `ffmpeg_renderer()` which requires that ffmpeg has been installed on your
+#' computer. As with `av_renderer()` it will use ffmpeg to encode the animation
+#' into a video
+#' - `sprite_renderer()` which requires `magick` and will render the animation
+#' into a spritesheet
+#' - `file_renderer()` which has no dependencies and simply returns the
+#' animation as a list of image files (one for each frame)
+#'
+#' It is possible to create your own renderer function providing that it
 #' matches the required signature (`frames` and `fps` argument). The return
 #' value of your provided function will be the return value ultimately given by
 #' [animate()]
@@ -18,12 +38,19 @@
 #' @param overwrite Logical. If TRUE, existing files will be overwritten.
 #' @param width,height Dimensions of the animation in pixels. If `NULL` will
 #' take the dimensions from the frame, otherwise it will rescale it.
+#' @param vfilter A string defining an ffmpeg filter graph. This is the same
+#' parameter as the `-vf` argument in the `ffmpeg` command line utility.
+#' @param codec The name of the video codec. The default is `libx264` for most
+#' formats, which usually the best choice. See the `av` documentation for more
+#' information.
+#' @param audio An optional file with sounds to add to the video
 #' @param format The video format to encode the animation into
 #' @param ffmpeg The location of the `ffmpeg` executable. If `NULL` it will be
 #' assumed to be on the search path
 #' @param options Either a character vector of command line options for ffmpeg
 #' or a named list of option-value pairs that will be converted to command line
 #' options automatically
+#' @param ... arguments passed on to the selected renderer
 #'
 #' @return The provided renderers are factory functions that returns a new function
 #' that take `frames` and `fps` as arguments, the former being a character
@@ -33,31 +60,47 @@
 #'
 #' The return type of the different returned renderers are:
 #' - **`gifski_renderer`**: Returns a [gif_image] object
-#' - **`file_renderer`**: Returns a vector of file paths
-#' - **`ffmpeg_renderer`**: Returns a [video_file] object
 #' - **`magick_renderer`**: Returns a `magick-image` object
+#' - **`av_renderer`**: Returns a [video_file] object
+#' - **`ffmpeg_renderer`**: Returns a [video_file] object
+#' - **`file_renderer`**: Returns a vector of file paths
 #'
 #' @name renderers
 #' @rdname renderers
 NULL
 
+gifski_first_error <- TRUE
 #' @rdname renderers
-#' @importFrom png readPNG
-#' @importFrom gifski gifski
 #' @export
 gifski_renderer <- function(file = tempfile(fileext = '.gif'), loop = TRUE, width = NULL, height = NULL) {
+  if (!requireNamespace('gifski', quietly = TRUE)) {
+    if (gifski_first_error) {
+      gifski_first_error <<- FALSE
+      stop(
+        'The `gifski_renderer()` is selected by default but requires the gifski\n',
+        'package to be installed. Either install gifski or use another renderer.\n',
+        'See `?renderers` for a list of available ones.',
+        call. = FALSE
+      )
+    } else {
+      stop('The gifski package is required to use gifski_renderer', call. = FALSE)
+    }
+  }
+  if (!requireNamespace('png', quietly = TRUE)) {
+    stop('The png package is required to use gifski_renderer', call. = FALSE)
+  }
   function(frames, fps) {
     if (!all(grepl('.png$', frames))) {
       stop('gifski only supports png files', call. = FALSE)
     }
     if (is.null(width) || is.null(height)) {
-      dims <- dim(readPNG(frames[1], native = TRUE))
+      dims <- dim(png::readPNG(frames[1], native = TRUE))
       height <- height %||% dims[1]
       width <- width %||% dims[2]
     }
     progress <- !isTRUE(getOption("knitr.in.progress"))
     if (progress) message('')
-    gif <- gifski(frames, file, width, height, delay = 1/fps, loop, progress)
+    gif <- gifski::gifski(frames, file, width, height, delay = 1/fps, loop, progress)
     gif_file(gif)
   }
 }
@@ -73,14 +116,46 @@ file_renderer <- function(dir = '~', prefix = 'gganim_plot', overwrite = FALSE) 
 }
 #' @rdname renderers
 #' @export
-ffmpeg_renderer <- function(format = 'mp4', ffmpeg = NULL, options = list(pix_fmt = 'yuv420p')) {
-  ffmpeg <- ffmpeg %||% 'ffmpeg'
+av_renderer <- function(file = NULL, vfilter = "null", codec = NULL, audio = NULL) {
+  if (!requireNamespace('av', quietly = TRUE)) {
+    stop('The av package is required to use av_renderer', call. = FALSE)
+  }
+  if (is.null(file)) {
+    ext <- if (.Platform$GUI == "RStudio" && "libvpx" %in% av::av_encoders()$name) ".webm" else ".mp4"
+    file <- tempfile(fileext = ext)
+  }
+  function(frames, fps) {
+    progress <- !isTRUE(getOption("knitr.in.progress"))
+    av::av_encode_video(input = frames, output = file, framerate = fps,
+                        vfilter = vfilter, codec = codec, audio = audio,
+                        verbose = progress)
+    video_file(file)
+  }
+}
+has_ffmpeg <- function(ffmpeg = 'ffmpeg') {
   tryCatch(
-    suppressWarnings(system2(ffmpeg, '-version', stdout = FALSE, stderr = FALSE)),
+    {
+      suppressWarnings(system2(ffmpeg, '-version', stdout = FALSE, stderr = FALSE))
+      TRUE
+    },
     error = function(e) {
-      stop('The ffmpeg library is not available at the specified location', call. = FALSE)
+      FALSE
     }
   )
+}
+#' @rdname renderers
+#' @export
+ffmpeg_renderer <- function(format = 'auto', ffmpeg = NULL, options = list(pix_fmt = 'yuv420p')) {
+  ffmpeg <- ffmpeg %||% 'ffmpeg'
+  if (!has_ffmpeg(ffmpeg)) stop('The ffmpeg library is not available at the specified location', call. = FALSE)
+  if (format == 'auto') {
+    format <- if (.Platform$GUI == "RStudio" &&
+                  any(grepl('--enable-libvpx', system2('ffmpeg', '-version', stdout = TRUE)))) {
+      "webm"
+    } else {
+      "mp4"
+    }
+  }
   if (is.list(options)) {
     if (is.null(names(options))) {
       stop('options list must be named', call. = FALSE)
@@ -92,19 +167,21 @@ ffmpeg_renderer <- function(format = 'mp4', ffmpeg = NULL, options = list(pix_fm
   stopifnot(is.character(options))
 
   function(frames, fps) {
+    progress <- !isTRUE(getOption("knitr.in.progress"))
     output_file <- tempfile(fileext = paste0('.', sub('^\\.', '', format)))
     frame_loc <- dirname(frames[1])
-    file_glob <- sub('^.*(\\..+$)', '%*\\1', basename(frames[1]))
+    file_glob <- sub('^.*(\\..+$)', 'gganim_plot%4d\\1', basename(frames[1]))
     file_glob <- file.path(frame_loc, file_glob)
-    system2(ffmpeg, c(
+    system2(ffmpeg, c("-pattern_type sequence",
       paste0('-i ', file_glob),
       '-y',
-      '-loglevel quiet',
+      '-loglevel ', if (progress) 'info' else 'quiet',
       paste0('-framerate ', 1/fps),
       '-hide_banner',
       options,
       output_file
     ))
+    if (!file.exists(output_file)) stop('Rendering with ffmpeg failed', call. = FALSE)
     if (format == 'gif') {
       gif_file(output_file)
     } else {
@@ -116,7 +193,7 @@ ffmpeg_renderer <- function(format = 'mp4', ffmpeg = NULL, options = list(pix_fm
 #' @export
 magick_renderer <- function(loop = TRUE) {
   if (!requireNamespace('magick', quietly = TRUE)) {
-    stop('The magick package is required to use this renderer', call. = FALSE)
+    stop('The magick package is required to use magick_renderer', call. = FALSE)
   }
   function(frames, fps) {
     anim <- if (grepl('.svg$', frames[1])) {
@@ -132,7 +209,7 @@ magick_renderer <- function(loop = TRUE) {
 #' @export
 sprite_renderer <- function() {
   if (!requireNamespace('magick', quietly = TRUE)) {
-    stop('The magick package is required to use this renderer', call. = FALSE)
+    stop('The magick package is required to use sprite_renderer', call. = FALSE)
   }
   function(frames, fps) {
     sprite <- if (grepl('.svg$', frames[1])) {
@@ -188,10 +265,11 @@ print.gif_image <- function(x, ...) {
 }
 #' @rdname gif_file
 #' @export
-knit_print.gif_image <- function(x, ...) {
+knit_print.gif_image <- function(x, options, ...) {
   knitr_path <- knitr::fig_path('.gif')
+  dir.create(dirname(knitr_path), showWarnings = FALSE, recursive = TRUE)
   file.copy(x, knitr_path, overwrite = TRUE)
-  knitr::knit_print(knitr::include_graphics(knitr_path))
+  knitr::knit_print(knitr::include_graphics(knitr_path), options, ...)
 }
 #' @rdname gif_file
 #' @export
@@ -231,7 +309,11 @@ video_file <- function(file) {
 #' @export
 print.video_file <- function(x, ...) {
   if (grepl('\\.(mp4)|(webm)|(ogg)$', x, ignore.case = TRUE)) {
-    print(htmltools::browsable(as_html_video(x)))
+    if (grepl('\\.mp4$', x, ignore.case = TRUE) && .Platform$GUI == "RStudio") {
+      utils::browseURL(x)
+    } else {
+      print(htmltools::browsable(as_html_video(x)))
+    }
   } else {
     viewer <- getOption("viewer", utils::browseURL)
     viewer(x)
@@ -239,9 +321,9 @@ print.video_file <- function(x, ...) {
 }
 #' @rdname video_file
 #' @export
-knit_print.video_file <- function(x, ...) {
+knit_print.video_file <- function(x, options, ...) {
   if (grepl('\\.(mp4)|(webm)|(ogg)$', x, ignore.case = TRUE)) {
-    knitr::knit_print(htmltools::browsable(as_html_video(x)))
+    knitr::knit_print(htmltools::browsable(as_html_video(x)), options, ...)
   } else {
     warning('The video format doesn\'t support HTML', call. = FALSE)
     invisible(NULL)
@@ -302,8 +384,8 @@ print.sprite_image <- function(x, ...) {
 }
 #' @rdname sprite_file
 #' @export
-knit_print.sprite_image <- function(x, ...) {
-  knitr::knit_print(htmltools::browsable(as_sprite_html(x)))
+knit_print.sprite_image <- function(x, options, ...) {
+  knitr::knit_print(htmltools::browsable(as_sprite_html(x)), options, ...)
 }
 #' @importFrom glue glue
 as_sprite_html <- function(x, ...) {

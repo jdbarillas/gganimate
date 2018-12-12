@@ -7,11 +7,17 @@ as.gganim <- function(x) {
   x$view <- view_static()
   x$shadow <- shadow_null()
   x$transmuters <- transmuter_list()
-  x$ease <- ease_aes('cubic-in-out')
+  x$ease <- ease_aes('linear')
   x
 }
 is.gganim <- function(x) inherits(x, 'gganim')
 
+#' @export
+plot.gganim <- function(x, frame = 50, total = 100, detail = 1, newpage = is.null(vp), vp = NULL, ...) {
+  plot <- prerender(x, total * detail)
+  plot$scene$plot_frame(plot, frame * detail, newpage = newpage, vp = vp)
+  invisible(x)
+}
 #' @rdname animate
 #' @export
 print.gganim <- function(x, ...) {
@@ -19,27 +25,29 @@ print.gganim <- function(x, ...) {
   print(anim, info = FALSE)
 }
 #' @rdname animate
+#' @param options chunk options for the currently executing chunk
 #' @export
-knit_print.gganim <- function(x, ...) {
-  anim <- animate(x)
-  knitr::knit_print(anim)
+knit_print.gganim <- function(x, options, ...) {
+  knitr_options <- get_knitr_options(options)
+  if (knitr::is_latex_output()) {
+    knitr_options$device <- 'current'
+    do.call(animate, c(list(plot = x), knitr_options))
+  } else {
+    anim <- do.call(animate, c(list(plot = x), knitr_options))
+    knitr::knit_print(anim, options, ...)
+  }
 }
-#' @rdname animate
-#' @importFrom ggplot2 ggplot ggplot_build ggplot_gtable
-#' @importFrom patchwork wrap_ggplot_grob wrap_plots
-plot.gganim <- function(x, nframes = 9, detail = 10, ...) {
-  nframes_total <- (nframes - 1) * detail + 1
-  x <- set_nframes(x, nframes_total)
-  x <- ggplot_build(x)
-  nframes_final <- get_nframes(x)
-  frame_ind <- unique(round(seq(1, nframes_final, length.out = nframes)))
-  tables <- lapply(frame_ind, function(i) {
-    gt <- ggplot_gtable(x$scene$get_frame(x, i))
-    wrap_ggplot_grob(gt)
-  })
-  wrap_plots(c(list(ggplot(), tables)))
+get_knitr_options <- function(options) {
+  opt <- options$gganimate
+  opt$device <- opt$device %||% options$dev
+  if (is.null(opt$width) || is.null(opt$height)) {
+    opt$width <- options$fig.width
+    opt$height <- options$fig.height
+    opt$units <- 'in'
+    opt$res <- options$dpi
+  }
+  c(opt, options$dev.args)
 }
-
 # HELPERS -----------------------------------------------------------------
 
 set_nframes <- function(plot, n) {

@@ -16,7 +16,7 @@
 #' # Adding a grouping variable in a transition call prior to calling `shadow_mark()` will
 #' # allow transitioning through different states in time.
 #'
-#' p1 <- ggplot(airquality, aes(Day, Time)) +
+#' p1 <- ggplot(airquality, aes(Day, Temp)) +
 #'   geom_line(color = 'red', size = 1) +
 #'   transition_time(Month) +
 #'   shadow_mark(colour = 'black', size = 0.75)
@@ -25,7 +25,7 @@
 #'
 #' # Add a future = TRUE argument to show data later in the animation.
 #'
-#' p2 <- ggplot(airquality, aes(Day, Time)) +
+#' p2 <- ggplot(airquality, aes(Day, Temp)) +
 #'   geom_line(color = 'red', size = 1) +
 #'   transition_time(Month) +
 #'   shadow_mark(color = 'black', size = 0.75, past = FALSE, future = TRUE)
@@ -55,7 +55,11 @@ shadow_mark <- function(past = TRUE, future = FALSE, ..., exclude_layer = NULL) 
 #' @importFrom rlang eval_tidy
 ShadowMark <- ggproto('ShadowMark', Shadow,
   train = function(self, data, params) {
-    params$raw <- lapply(data, function(d) {
+    params$raw <- lapply(seq_along(data), function(i) {
+      d <- data[[i]]
+      if (i %in% params$excluded_layers) {
+        return(d[[1]][0, , drop = FALSE])
+      }
       d <- lapply(d, function(dd) {
         dd[dd$.phase == 'raw', , drop = FALSE]
       })
